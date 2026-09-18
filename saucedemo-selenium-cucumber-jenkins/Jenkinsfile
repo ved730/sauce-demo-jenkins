@@ -1,0 +1,69 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'Maven3'   // must match the name configured in Manage Jenkins > Tools
+        jdk 'JDK11'      // must match the name configured in Manage Jenkins > Tools
+    }
+
+    // The pom.xml and src/ live inside this subfolder of the repo, not at the root.
+    environment {
+        PROJECT_DIR = 'saucedemo-selenium-cucumber-jenkins'
+    }
+
+    options {
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir(env.PROJECT_DIR) {
+                    bat 'mvn -B clean compile'
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                dir(env.PROJECT_DIR) {
+                    // BaseTest/Hooks auto-detect the JENKINS_URL env var and run Chrome headless.
+                    bat 'mvn -B test'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Publish TestNG results (requires the "TestNG Results" Jenkins plugin)
+            testng testResultsPattern: "${env.PROJECT_DIR}/target/surefire-reports/testng-results.xml"
+
+            // Publish the Cucumber HTML report (requires the "HTML Publisher" plugin)
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: "${env.PROJECT_DIR}/target/cucumber-reports",
+                reportFiles: 'cucumber.html',
+                reportName: 'Cucumber Report'
+            ])
+
+            archiveArtifacts artifacts: "${env.PROJECT_DIR}/target/surefire-reports/**, ${env.PROJECT_DIR}/target/cucumber-reports/**", allowEmptyArchive: true
+        }
+        success {
+            echo 'Build and tests passed.'
+        }
+        failure {
+            echo 'Build or tests failed — check the reports above.'
+        }
+    }
+}
